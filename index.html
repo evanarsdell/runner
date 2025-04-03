@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Polished Endless Runner</title>
+  <title>Enhanced Endless Runner</title>
   <style>
     /* Reset & basic styles */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { overflow: hidden; font-family: sans-serif; background: #000; }
     canvas { display: block; }
-    /* Overlay for start and game over screens */
+    /* Overlay for start & game-over screens */
     #overlay {
       position: absolute;
       top: 0; left: 0;
@@ -24,7 +24,7 @@
       text-align: center;
       padding: 20px;
     }
-    /* Progress meter at the top */
+    /* Progress meter */
     #progressContainer {
       position: absolute;
       top: 5px;
@@ -43,25 +43,42 @@
       border-radius: 5px;
       transition: width 0.2s ease;
     }
-    /* On-screen control buttons */
-    .controlButton {
+    /* On-screen control buttons (for mobile) */
+    #controlContainer {
       position: fixed;
       bottom: 20px;
-      padding: 12px 20px;
-      font-size: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 11;
+    }
+    .controlButton {
+      padding: 12px 16px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      opacity: 0.9;
+    }
+    /* Top corner buttons */
+    .topButton {
+      position: fixed;
+      top: 10px;
+      padding: 8px 12px;
+      font-size: 14px;
       border: none;
       border-radius: 5px;
       z-index: 11;
       opacity: 0.9;
     }
-    #jumpButton { left: 20px; background: #28a745; color: #fff; }
-    #powerButton { right: 20px; background: #17a2b8; color: #fff; }
+    #pauseButton { left: 10px; background: #ffc107; color: #000; }
+    #muteButton { right: 10px; background: #dc3545; color: #fff; }
   </style>
 </head>
 <body>
-  <!-- Overlay for start screen & game over -->
+  <!-- Overlay (start & game over screens) -->
   <div id="overlay">
-    <h1>Polished Runner</h1>
+    <h1>Enhanced Runner</h1>
     <p>Tap anywhere or press any key to start</p>
   </div>
   <!-- Progress Meter -->
@@ -70,13 +87,19 @@
   </div>
   <!-- Game Canvas -->
   <canvas id="gameCanvas"></canvas>
-  <!-- On-screen control buttons -->
-  <button id="jumpButton" class="controlButton" style="display:none;">Jump</button>
-  <button id="powerButton" class="controlButton" style="display:none;">Shield</button>
+  <!-- On-screen controls (visible on touch devices) -->
+  <div id="controlContainer" style="display:none;">
+    <button id="jumpButton" class="controlButton" style="background:#28a745; color:#fff;">Jump</button>
+    <button id="slideButton" class="controlButton" style="background:#6c757d; color:#fff;">Slide</button>
+    <button id="powerButton" class="controlButton" style="background:#17a2b8; color:#fff;">Shield</button>
+  </div>
+  <!-- Top corner buttons for pause & mute -->
+  <button id="pauseButton" class="topButton">Pause</button>
+  <button id="muteButton" class="topButton">Mute</button>
 
   <script>
     // ==========================
-    // Basic Setup & Global Vars
+    // Global Variables & Setup
     // ==========================
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
@@ -85,29 +108,37 @@
     const groundHeight = 50;
     const groundY = height - groundHeight;
 
-    // Overlay & controls
     const overlay = document.getElementById("overlay");
-    const jumpButton = document.getElementById("jumpButton");
-    const powerButton = document.getElementById("powerButton");
     const progressBar = document.getElementById("progressBar");
+    const controlContainer = document.getElementById("controlContainer");
+    const jumpButton = document.getElementById("jumpButton");
+    const slideButton = document.getElementById("slideButton");
+    const powerButton = document.getElementById("powerButton");
+    const pauseButton = document.getElementById("pauseButton");
+    const muteButton = document.getElementById("muteButton");
 
-    // Game state variables
+    // Game state flags
     let gameStarted = false;
     let gameOver = false;
+    let gamePaused = false;
+    let soundOn = true;
     let lastTime = 0;
     let score = 0;
     let coinsCollected = 0;
     let gameSpeed = 6;
     let level = 1;
-    let levelThreshold = 100; // Increase level every 100 points
+    let levelThreshold = 100;
     let elapsedTime = 0;
     let highScore = localStorage.getItem("highScore") || 0;
+    let backgroundChimeInterval = null;
+    let levelUpTimer = 0;
 
     // ==========================
-    // Audio Setup (JS Generated)
+    // Audio Functions (JS Generated)
     // ==========================
     let audioCtx = null;
     function playTone(freq, duration, volume = 0.5) {
+      if (!soundOn) return;
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
@@ -125,43 +156,30 @@
     function playCoinSound() { playTone(600, 0.1); }
     function playCollisionSound() { playTone(100, 0.2); }
     function playPowerSound() { playTone(500, 0.15); }
-    // Background chime loop (low volume)
     function startBackgroundChime() {
-      setInterval(() => {
-        playTone(200, 0.05, 0.2);
-      }, 1500);
+      if (!backgroundChimeInterval) {
+        backgroundChimeInterval = setInterval(() => {
+          playTone(200, 0.05, 0.2);
+        }, 1500);
+      }
     }
 
     // ==========================
     // Theme & Background Setup
     // ==========================
     const themes = [
-      {
-        name: "day",
-        gradient: ["#87CEEB", "#ffffff"],
-        extras: "clouds"
-      },
-      {
-        name: "sunset",
-        gradient: ["#ff9a9e", "#fad0c4"],
-        extras: "birds"
-      },
-      {
-        name: "night",
-        gradient: ["#0f2027", "#203a43"],
-        extras: "stars"
-      }
+      { name: "day", gradient: ["#87CEEB", "#ffffff"], extras: "clouds" },
+      { name: "sunset", gradient: ["#ff9a9e", "#fad0c4"], extras: "birds" },
+      { name: "night", gradient: ["#0f2027", "#203a43"], extras: "stars" }
     ];
     const theme = themes[Math.floor(Math.random() * themes.length)];
-    // Prepare parallax layers (two layers: far & near)
     let farObjects = [];
     let nearObjects = [];
     function initBackground() {
       farObjects = [];
       nearObjects = [];
-      // Create a number of objects based on theme extras
-      let count = 10;
-      for (let i = 0; i < count; i++) {
+      // Far objects (e.g. stars or clouds)
+      for (let i = 0; i < 10; i++) {
         farObjects.push({
           x: Math.random() * width,
           y: Math.random() * (height * 0.5),
@@ -169,8 +187,8 @@
           speed: 0.5 + Math.random() * 0.5
         });
       }
-      count = 6;
-      for (let i = 0; i < count; i++) {
+      // Near objects (e.g. hills/trees)
+      for (let i = 0; i < 6; i++) {
         nearObjects.push({
           x: Math.random() * width,
           y: groundY - (10 + Math.random() * 40),
@@ -190,6 +208,7 @@
       y: groundY - 60,
       width: 40,
       height: 60,
+      originalHeight: 60,
       dy: 0,
       jumpForce: -15,
       gravity: 0.8,
@@ -199,103 +218,139 @@
       animationFrame: 0,
       shieldActive: false,
       shieldTimer: 0,
-      shieldDuration: 3000 // 3 seconds
+      shieldDuration: 3000, // 3 seconds
+      sliding: false,
+      slideTimer: 0,
+      slideDuration: 500 // 0.5 seconds
     };
 
     // ==========================
-    // Game Objects: Obstacles, Coins, PowerUps
+    // Game Objects
     // ==========================
     let obstacles = [];
     let coins = [];
     let powerUps = [];
-    // Timers for spawning
     let obstacleTimer = 0;
     let coinTimer = 0;
     let powerTimer = 0;
-    const obstacleInterval = 1500; // ms
+    const obstacleInterval = 1500;
     const coinInterval = 2000;
     const powerInterval = 7000;
 
-    // Obstacle types: spike, boulder, bird
+    // ==========================
+    // Spawn Functions
+    // ==========================
     function spawnObstacle() {
       const typeChance = Math.random();
-      let obstacle = { x: width, type: "", speedModifier: 1 };
-      if (typeChance < 0.4) { // Spike: triangle on ground
-        obstacle.type = "spike";
-        obstacle.width = 30;
-        obstacle.height = 30;
-        obstacle.y = groundY - obstacle.height;
-      } else if (typeChance < 0.7) { // Boulder: rolling circle
-        obstacle.type = "boulder";
-        obstacle.radius = 15 + Math.random() * 10;
-        obstacle.width = obstacle.radius * 2;
-        obstacle.height = obstacle.radius * 2;
-        obstacle.y = groundY - obstacle.height;
-      } else { // Bird: flying enemy
-        obstacle.type = "bird";
-        obstacle.width = 40;
-        obstacle.height = 30;
-        obstacle.y = groundY - 150 - Math.random() * 50;
+      let obs = { x: width, type: "", speedModifier: 1 };
+      if (typeChance < 0.4) { // Spike (triangle)
+        obs.type = "spike";
+        obs.width = 30;
+        obs.height = 30;
+        obs.y = groundY - obs.height;
+      } else if (typeChance < 0.7) { // Boulder (rolling circle)
+        obs.type = "boulder";
+        obs.radius = 15 + Math.random() * 10;
+        obs.width = obs.radius * 2;
+        obs.height = obs.radius * 2;
+        obs.y = groundY - obs.height;
+      } else { // Bird (flying enemy)
+        obs.type = "bird";
+        obs.width = 40;
+        obs.height = 30;
+        obs.y = groundY - 150 - Math.random() * 50;
       }
-      obstacles.push(obstacle);
+      obstacles.push(obs);
     }
     function spawnCoin() {
-      const coin = {
+      coins.push({
         x: width,
         y: groundY - 100 - Math.random() * 80,
         radius: 10
-      };
-      coins.push(coin);
+      });
     }
     function spawnPowerUp() {
-      const power = {
+      powerUps.push({
         x: width,
         y: groundY - 120 - Math.random() * 50,
         size: 25,
         type: "shield"
-      };
-      powerUps.push(power);
+      });
     }
 
     // ==========================
     // Input Handling
     // ==========================
     function jump() {
-      if (player.jumpCount < player.maxJumps) {
+      if (player.jumpCount < player.maxJumps && !player.sliding) {
         player.dy = player.jumpForce;
         player.jumpCount++;
         playJumpSound();
       }
     }
+    function slide() {
+      if (!player.sliding && player.jumpCount === 0) { // allow slide only when grounded
+        player.sliding = true;
+        player.slideTimer = player.slideDuration;
+        // Reduce hitbox height and adjust y position
+        player.height = player.originalHeight / 2;
+        player.y += player.originalHeight / 2;
+      }
+    }
     function activateShield() {
-      // Activate shield only if not already active
       if (!player.shieldActive) {
         player.shieldActive = true;
         player.shieldTimer = player.shieldDuration;
         playPowerSound();
       }
     }
-    // Keyboard
+    function togglePause() {
+      gamePaused = !gamePaused;
+      pauseButton.innerText = gamePaused ? "Resume" : "Pause";
+      // Reset lastTime to avoid a large dt when resuming
+      lastTime = performance.now();
+    }
+    function toggleMute() {
+      soundOn = !soundOn;
+      muteButton.innerText = soundOn ? "Mute" : "Unmute";
+    }
+
+    // Keyboard events
     document.addEventListener("keydown", (e) => {
       if (!gameStarted) startGame();
-      if (e.code === "Space" || e.code === "ArrowUp") {
-        jump();
-      }
-      if (e.code === "KeyP") { // use power-up with "P" key
-        activateShield();
-      }
+      if (e.code === "Space" || e.code === "ArrowUp") jump();
+      if (e.code === "ArrowDown") slide();
+      if (e.code === "KeyP") activateShield();
+      if (e.code === "KeyM") toggleMute();
+      if (e.code === "KeyO") togglePause();
     });
-    // Touch & click events
+
+    // Touch swipe detection for jump vs slide
+    let touchStartX = 0, touchStartY = 0;
     document.addEventListener("touchstart", (e) => {
       if (!gameStarted) startGame();
-      jump();
+      touchStartX = e.changedTouches[0].clientX;
+      touchStartY = e.changedTouches[0].clientY;
     });
-    // On-screen buttons
+    document.addEventListener("touchend", (e) => {
+      let dx = e.changedTouches[0].clientX - touchStartX;
+      let dy = e.changedTouches[0].clientY - touchStartY;
+      if (Math.abs(dy) > 30 && dy > 0) { // downward swipe
+        slide();
+      } else if (Math.abs(dx) < 30 && Math.abs(dy) < 30) {
+        jump();
+      }
+    });
+
+    // On-screen button events (for mobile)
     jumpButton.addEventListener("click", jump);
+    slideButton.addEventListener("click", slide);
     powerButton.addEventListener("click", activateShield);
+    pauseButton.addEventListener("click", togglePause);
+    muteButton.addEventListener("click", toggleMute);
 
     // ==========================
-    // Collision Detection Helper
+    // Collision Detection Helpers
     // ==========================
     function rectIntersect(a, b) {
       return (a.x < b.x + b.width &&
@@ -304,7 +359,6 @@
               a.y + a.height > b.y);
     }
     function circleRectIntersect(circle, rect) {
-      // Find closest point to the circle within the rectangle
       let closestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.width));
       let closestY = Math.max(rect.y, Math.min(circle.y, rect.y + rect.height));
       let dx = circle.x - closestX;
@@ -313,74 +367,75 @@
     }
 
     // ==========================
-    // Game Reset & Loop
+    // Game Loop & Update Functions
     // ==========================
     function resetGame() {
-      // Reset game state variables
       score = 0;
       coinsCollected = 0;
       gameSpeed = 6;
       level = 1;
       elapsedTime = 0;
       player.x = 50;
-      player.y = groundY - player.height;
+      player.y = groundY - player.originalHeight;
       player.dy = 0;
       player.jumpCount = 0;
       player.shieldActive = false;
       player.shieldTimer = 0;
+      player.sliding = false;
+      player.height = player.originalHeight;
       obstacles = [];
       coins = [];
       powerUps = [];
       obstacleTimer = 0;
       coinTimer = 0;
       powerTimer = 0;
-      lastTime = performance.now();
+      levelUpTimer = 0;
       initBackground();
       overlay.style.display = "none";
       gameOver = false;
       gameStarted = true;
       startBackgroundChime();
+      lastTime = performance.now();
       requestAnimationFrame(gameLoop);
     }
     function gameLoop(timestamp) {
       if (gameOver) return;
-      let deltaTime = timestamp - lastTime;
+      if (gamePaused) {
+        lastTime = performance.now();
+        draw();
+        requestAnimationFrame(gameLoop);
+        return;
+      }
+      let dt = timestamp - lastTime;
       lastTime = timestamp;
-      elapsedTime += deltaTime;
-      update(deltaTime);
+      elapsedTime += dt;
+      update(dt);
       draw();
       requestAnimationFrame(gameLoop);
     }
-
-    // ==========================
-    // Update Game State
-    // ==========================
     function update(dt) {
-      // Increase game speed gradually with score
+      // Gradually increase game speed with score
       gameSpeed = 6 + score / 150;
-
-      // Update progress bar toward next level threshold
+      // Update progress bar and check level-up
       let progress = (score % levelThreshold) / levelThreshold;
       progressBar.style.width = (progress * 100) + "%";
-      // Check level up
       if (score > level * levelThreshold) {
         level++;
-        // Optionally show a level-up flash/effect (for brevity, we use an alert fade)
-        ctx.fillStyle = "rgba(255,255,0,0.5)";
-        ctx.fillRect(0,0,width,height);
+        levelUpTimer = 500;
       }
-
-      // Update background parallax objects
+      // Update parallax background
       farObjects.forEach(obj => {
         obj.x -= obj.speed;
-        if (obj.x < -obj.size) { obj.x = width + obj.size; obj.y = Math.random() * height * 0.5; }
+        if (obj.x < -obj.size) {
+          obj.x = width + obj.size;
+          obj.y = Math.random() * height * 0.5;
+        }
       });
       nearObjects.forEach(obj => {
         obj.x -= obj.speed * (gameSpeed/6);
         if (obj.x < -obj.width) { obj.x = width; }
       });
-
-      // Update player physics
+      // Player physics
       player.dy += player.gravity;
       player.y += player.dy;
       if (player.y + player.height >= groundY) {
@@ -388,21 +443,23 @@
         player.dy = 0;
         player.jumpCount = 0;
       }
-      // Update shield timer if active
-      if (player.shieldActive) {
-        player.shieldTimer -= dt;
-        if (player.shieldTimer <= 0) {
-          player.shieldActive = false;
+      // Update slide state
+      if (player.sliding) {
+        player.slideTimer -= dt;
+        if (player.slideTimer <= 0) {
+          // End slide: restore height and adjust y position
+          player.sliding = false;
+          player.y -= player.originalHeight / 2;
+          player.height = player.originalHeight;
         }
       }
-      // Animate player running (cycle frames every 100ms)
+      // Animate running (cycle every 100ms)
       player.animationTimer += dt;
       if (player.animationTimer > 100) {
         player.animationFrame = (player.animationFrame + 1) % 2;
         player.animationTimer = 0;
       }
-
-      // Spawn obstacles, coins, and power-ups at intervals
+      // Spawn obstacles, coins, power-ups
       obstacleTimer += dt;
       if (obstacleTimer > obstacleInterval + Math.random() * 500) {
         spawnObstacle();
@@ -418,19 +475,15 @@
         spawnPowerUp();
         powerTimer = 0;
       }
-
       // Update obstacles
       for (let i = obstacles.length - 1; i >= 0; i--) {
-        obstacles[i].x -= gameSpeed * (obstacles[i].speedModifier || 1);
-        // Remove offscreen obstacles
-        if (obstacles[i].x + (obstacles[i].width || obstacles[i].radius*2) < 0)
+        let obs = obstacles[i];
+        obs.x -= gameSpeed * (obs.speedModifier || 1);
+        if (obs.x + (obs.width || obs.radius*2) < 0) {
           obstacles.splice(i, 1);
-        else {
-          // Collision detection with player (if not shielded)
-          let obs = obstacles[i];
+        } else {
           let collision = false;
           if (obs.type === "boulder") {
-            // Treat as circle collision
             collision = circleRectIntersect({x: obs.x+obs.radius, y: obs.y+obs.radius, radius: obs.radius}, player);
           } else {
             collision = rectIntersect(player, {x: obs.x, y: obs.y, width: obs.width, height: obs.height});
@@ -447,14 +500,11 @@
         coins[i].x -= gameSpeed;
         if (coins[i].x + coins[i].radius < 0) {
           coins.splice(i, 1);
-        } else {
-          // Check collision with player (circle vs rectangle)
-          if (circleRectIntersect({x: coins[i].x, y: coins[i].y, radius: coins[i].radius}, player)) {
-            coinsCollected++;
-            score += 10;
-            playCoinSound();
-            coins.splice(i, 1);
-          }
+        } else if (circleRectIntersect({x: coins[i].x, y: coins[i].y, radius: coins[i].radius}, player)) {
+          coinsCollected++;
+          score += 10;
+          playCoinSound();
+          coins.splice(i, 1);
         }
       }
       // Update power-ups
@@ -462,31 +512,34 @@
         powerUps[i].x -= gameSpeed;
         if (powerUps[i].x + powerUps[i].size < 0) {
           powerUps.splice(i, 1);
-        } else {
-          if (rectIntersect(player, {x: powerUps[i].x, y: powerUps[i].y, width: powerUps[i].size, height: powerUps[i].size})) {
-            // Auto-activate shield on pickup
-            player.shieldActive = true;
-            player.shieldTimer = player.shieldDuration;
-            playPowerSound();
-            powerUps.splice(i, 1);
-          }
+        } else if (rectIntersect(player, {x: powerUps[i].x, y: powerUps[i].y, width: powerUps[i].size, height: powerUps[i].size})) {
+          player.shieldActive = true;
+          player.shieldTimer = player.shieldDuration;
+          playPowerSound();
+          powerUps.splice(i, 1);
         }
+      }
+      // Update shield timer
+      if (player.shieldActive) {
+        player.shieldTimer -= dt;
+        if (player.shieldTimer <= 0) player.shieldActive = false;
       }
       // Update score over time
       score += dt * 0.01;
+      if(levelUpTimer > 0) levelUpTimer -= dt;
     }
 
     // ==========================
     // Drawing Functions
     // ==========================
     function drawBackground() {
-      // Draw gradient background based on theme
+      // Gradient background based on theme
       let grad = ctx.createLinearGradient(0, 0, 0, height);
       grad.addColorStop(0, theme.gradient[0]);
       grad.addColorStop(1, theme.gradient[1]);
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, width, height);
-      // Draw far parallax objects (e.g., stars for night, clouds for day/sunset)
+      // Far parallax objects (stars or clouds)
       farObjects.forEach(obj => {
         if (theme.extras === "stars") {
           ctx.fillStyle = "#fff";
@@ -500,41 +553,46 @@
           ctx.fill();
         }
       });
-      // Draw near parallax objects (e.g., hills or trees)
+      // Near parallax objects (hills/trees)
       nearObjects.forEach(obj => {
         ctx.fillStyle = "#2d572c";
         ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
       });
-      // Draw ground
+      // Ground
       ctx.fillStyle = "#654321";
       ctx.fillRect(0, groundY, width, groundHeight);
     }
     function drawPlayer() {
-      // Draw a simple pixel-style character with basic running animation.
-      // Body
+      // Draw a pixel-style character with running animation
       ctx.fillStyle = "#FFD700";
+      // If sliding, draw a lower profile rectangle
       ctx.fillRect(player.x, player.y, player.width, player.height);
-      // Head (circle)
+      // Draw head (circle)
       ctx.beginPath();
       ctx.arc(player.x + player.width/2, player.y - 10, 10, 0, Math.PI*2);
-      ctx.fillStyle = "#FFD700";
       ctx.fill();
-      // Legs animation: alternate positions based on animationFrame
+      // Legs animation
       ctx.strokeStyle = "#000";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      if (player.animationFrame === 0) {
-        // Left leg forward, right leg back
-        ctx.moveTo(player.x + 10, player.y + player.height);
-        ctx.lineTo(player.x + 10, player.y + player.height + 15);
-        ctx.moveTo(player.x + 30, player.y + player.height);
-        ctx.lineTo(player.x + 30, player.y + player.height + 5);
+      if (!player.sliding) {
+        if (player.animationFrame === 0) {
+          ctx.moveTo(player.x + 10, player.y + player.height);
+          ctx.lineTo(player.x + 10, player.y + player.height + 15);
+          ctx.moveTo(player.x + 30, player.y + player.height);
+          ctx.lineTo(player.x + 30, player.y + player.height + 5);
+        } else {
+          ctx.moveTo(player.x + 10, player.y + player.height);
+          ctx.lineTo(player.x + 10, player.y + player.height + 5);
+          ctx.moveTo(player.x + 30, player.y + player.height);
+          ctx.lineTo(player.x + 30, player.y + player.height + 15);
+        }
       } else {
-        // Reverse
-        ctx.moveTo(player.x + 10, player.y + player.height);
-        ctx.lineTo(player.x + 10, player.y + player.height + 5);
-        ctx.moveTo(player.x + 30, player.y + player.height);
-        ctx.lineTo(player.x + 30, player.y + player.height + 15);
+        // In slide, draw legs closer to the body
+        ctx.moveTo(player.x + 15, player.y + player.height);
+        ctx.lineTo(player.x + 15, player.y + player.height + 10);
+        ctx.moveTo(player.x + 25, player.y + player.height);
+        ctx.lineTo(player.x + 25, player.y + player.height + 10);
       }
       ctx.stroke();
       // Draw shield if active
@@ -542,14 +600,13 @@
         ctx.strokeStyle = "#00FFFF";
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.arc(player.x + player.width/2, player.y + player.height/2, player.width, 0, Math.PI * 2);
+        ctx.arc(player.x + player.width/2, player.y + player.height/2, player.width, 0, Math.PI*2);
         ctx.stroke();
       }
     }
     function drawObstacles() {
       obstacles.forEach(obs => {
         if (obs.type === "spike") {
-          // Draw triangle spikes
           ctx.fillStyle = "#FF0000";
           ctx.beginPath();
           ctx.moveTo(obs.x, obs.y + obs.height);
@@ -558,13 +615,11 @@
           ctx.closePath();
           ctx.fill();
         } else if (obs.type === "boulder") {
-          // Draw rolling boulder
           ctx.fillStyle = "#555";
           ctx.beginPath();
           ctx.arc(obs.x + obs.radius, obs.y + obs.radius, obs.radius, 0, Math.PI*2);
           ctx.fill();
         } else if (obs.type === "bird") {
-          // Draw a simple bird shape (small triangle)
           ctx.fillStyle = "#000";
           ctx.beginPath();
           ctx.moveTo(obs.x, obs.y + obs.height/2);
@@ -596,16 +651,20 @@
       });
     }
     function drawHUD() {
-      // Draw score, coins, and time in the top corners (optional additional info)
       ctx.fillStyle = "#fff";
       ctx.font = "16px sans-serif";
       ctx.fillText("Score: " + Math.floor(score), 10, 20);
       ctx.fillText("Coins: " + coinsCollected, 10, 40);
       let seconds = Math.floor(elapsedTime / 1000);
       ctx.fillText("Time: " + seconds + "s", width - 100, 20);
+      if(levelUpTimer > 0) {
+        ctx.fillStyle = "rgba(255,255,0,0.7)";
+        ctx.font = "bold 48px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Level Up!", width/2, height/2);
+      }
     }
     function draw() {
-      // Clear canvas and redraw everything
       drawBackground();
       drawCoins();
       drawPowerUps();
@@ -615,16 +674,14 @@
     }
 
     // ==========================
-    // End Game & Overlay Screen
+    // End Game & Start Game Functions
     // ==========================
     function endGame() {
       gameOver = true;
-      // Save high score if needed
       if (score > highScore) {
         highScore = Math.floor(score);
         localStorage.setItem("highScore", highScore);
       }
-      // Show overlay with stats
       overlay.innerHTML = `
         <h1>Game Over</h1>
         <p>Score: ${Math.floor(score)}</p>
@@ -634,32 +691,30 @@
         <button id="restartButton" style="padding:10px 20px; font-size:18px;">Try Again</button>
       `;
       overlay.style.display = "flex";
-      document.getElementById("restartButton").addEventListener("click", () => {
-        resetGame();
-      });
+      document.getElementById("restartButton").addEventListener("click", resetGame);
     }
-
-    // ==========================
-    // Start Game Function
-    // ==========================
     function startGame() {
       if (!gameStarted) {
         resetGame();
-        // Show on-screen buttons on touch devices
+        // Show on-screen controls on touch devices
         if ('ontouchstart' in window || navigator.maxTouchPoints) {
-          jumpButton.style.display = "block";
-          powerButton.style.display = "block";
+          controlContainer.style.display = "flex";
         }
       }
     }
-    // Start game on overlay click/tap
-    overlay.addEventListener("click", startGame);
 
-    // Adjust canvas on window resize
+    // ==========================
+    // Window Resize Handling
+    // ==========================
     window.addEventListener("resize", () => {
       width = canvas.width = window.innerWidth;
       height = canvas.height = window.innerHeight;
     });
+
+    // ==========================
+    // Start the Game on Overlay Click
+    // ==========================
+    overlay.addEventListener("click", startGame);
   </script>
 </body>
 </html>
