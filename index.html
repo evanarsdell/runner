@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Endless Runner</title>
+  <style>
+    /* Basic Reset */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: sans-serif;
+      overflow: hidden;
+      background: #f0f0f0;
+    }
+    /* The game canvas fills the window */
+    canvas {
+      display: block;
+      background: #87CEEB; /* Sky blue */
+    }
+    /* Overlay for start screen and game over */
+    #overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.5);
+      color: #fff;
+      z-index: 2;
+      text-align: center;
+      padding: 20px;
+    }
+    /* Score displays */
+    #score, #highScore {
+      position: absolute;
+      top: 10px;
+      font-size: 24px;
+      color: #000;
+      z-index: 1;
+      text-shadow: 1px 1px 2px #fff;
+    }
+    #score { left: 10px; }
+    #highScore { right: 10px; }
+    /* Jump button for touch devices */
+    #jumpButton {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      font-size: 18px;
+      background: #333;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      z-index: 3;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <!-- Overlay for start screen and game over -->
+  <div id="overlay">
+    <h1>Endless Runner</h1>
+    <p>Tap anywhere to start</p>
+  </div>
+  <!-- Game canvas -->
+  <canvas id="gameCanvas"></canvas>
+  <!-- Score displays -->
+  <div id="score">Score: 0</div>
+  <div id="highScore">High Score: 0</div>
+  <!-- Jump button (visible on touch devices) -->
+  <button id="jumpButton" style="display:none;">Jump</button>
+
+  <script>
+    // Get elements and set canvas dimensions
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const scoreEl = document.getElementById('score');
+    const highScoreEl = document.getElementById('highScore');
+    const jumpButton = document.getElementById('jumpButton');
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+
+    // Set up simple Web Audio beep sounds
+    let audioCtx = null;
+    function playSound(frequency, duration) {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.frequency.value = frequency;
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + duration);
+    }
+
+    // Game variables
+    const gameSpeed = 6;
+    const gravity = 0.6;
+    let score = 0;
+    let highScore = localStorage.getItem('highScore') || 0;
+    highScoreEl.innerText = 'High Score: ' + highScore;
+    let gameOver = false;
+    let gameStarted = false;
+    let lastTime = 0;
+    let obstacleTimer = 0;
+    const obstacleInterval = 1500; // in milliseconds
+
+    // Player object (a red square)
+    const player = {
+      x: 50,
+      y: height - 60,
+      width: 30,
+      height: 30,
+      dy: 0,
+      jumpForce: -12,
+      grounded: false,
+    };
+
+    // Obstacles array
+    let obstacles = [];
+
+    // Clouds for background parallax (simple circles)
+    let clouds = [];
+    for (let i = 0; i < 5; i++) {
+      clouds.push({
+        x: Math.random() * width,
+        y: Math.random() * height * 0.5,
+        r: 20 + Math.random() * 20,
+        speed: 0.3 + Math.random() * 0.5
+      });
+    }
+
+    // Reset game variables and start the game loop
+    function resetGame() {
+      player.y = height - 60;
+      player.dy = 0;
+      player.grounded = false;
+      obstacles = [];
+      obstacleTimer = 0;
+      score = 0;
+      gameOver = false;
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
+    // Player jump action
+    function jump() {
+      if (player.grounded) {
+        player.dy = player.jumpForce;
+        player.grounded = false;
+        playSound(300, 0.1); // jump sound beep
+      }
+    }
+
+    // Handle keyboard and touch input
+    function handleInput(e) {
+      if (!gameStarted) return;
+      if (e.type === 'keydown' && e.code === 'Space') {
+        jump();
+      } else if (e.type === 'touchstart') {
+        jump();
+      }
+    }
+    document.addEventListener('keydown', handleInput);
+    document.addEventListener('touchstart', handleInput);
+    jumpButton.addEventListener('click', jump);
+
+    // Spawn a new obstacle (a black square) at a random size
+    function spawnObstacle() {
+      const size = 30 + Math.random() * 20;
+      const obstacle = {
+        x: width,
+        y: height - 60,
+        width: size,
+        height: size,
+      };
+      obstacles.push(obstacle);
+    }
+
+    // Update game state
+    function update(deltaTime) {
+      // Update clouds for parallax background
+      clouds.forEach(cloud => {
+        cloud.x -= cloud.speed;
+        if (cloud.x < -cloud.r * 2) {
+          cloud.x = width + cloud.r * 2;
+          cloud.y = Math.random() * height * 0.5;
+        }
+      });
+
+      // Update player physics
+      player.dy += gravity;
+      player.y += player.dy;
+      if (player.y + player.height >= height - 30) {
+        player.y = height - 30 - player.height;
+        player.dy = 0;
+        player.grounded = true;
+      }
+      // Update obstacles
+      obstacleTimer += deltaTime;
+      if (obstacleTimer > obstacleInterval) {
+        spawnObstacle();
+        obstacleTimer = 0;
+      }
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].x -= gameSpeed;
+        // Remove obstacles that have gone off screen
+        if (obstacles[i].x + obstacles[i].width < 0) {
+          obstacles.splice(i, 1);
+        }
+        // Collision detection
+        if (player.x < obstacles[i].x + obstacles[i].width &&
+            player.x + player.width > obstacles[i].x &&
+            player.y < obstacles[i].y + obstacles[i].height &&
+            player.y + player.height > obstacles[i].y) {
+          playSound(100, 0.2); // collision sound beep
+          gameOver = true;
+        }
+      }
+      // Update score based on time
+      score += deltaTime * 0.01;
+      scoreEl.innerText = 'Score: ' + Math.floor(score);
+      if (score > highScore) {
+        highScore = Math.floor(score);
+        highScoreEl.innerText = 'High Score: ' + highScore;
+        localStorage.setItem('highScore', highScore);
+      }
+    }
+
+    // Draw everything on the canvas
+    function draw() {
+      // Draw sky background
+      ctx.fillStyle = '#87CEEB';
+      ctx.fillRect(0, 0, width, height);
+      // Draw clouds
+      clouds.forEach(cloud => {
+        ctx.beginPath();
+        ctx.arc(cloud.x, cloud.y, cloud.r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.fill();
+      });
+      // Draw ground
+      ctx.fillStyle = '#654321';
+      ctx.fillRect(0, height - 30, width, 30);
+      // Draw the player (red square)
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(player.x, player.y, player.width, player.height);
+      // Draw obstacles (black squares)
+      ctx.fillStyle = '#000';
+      obstacles.forEach(obstacle => {
+        ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+      });
+    }
+
+    // The game loop
+    function loop(timestamp) {
+      if (gameOver) {
+        overlay.innerHTML = '<h1>Game Over</h1><p>Score: ' + Math.floor(score) +
+                            '</p><button id="restartButton" style="padding:10px 20px;font-size:18px;">Restart</button>';
+        overlay.style.display = 'flex';
+        document.getElementById('restartButton').addEventListener('click', () => {
+          overlay.style.display = 'none';
+          resetGame();
+        });
+        return;
+      }
+      const deltaTime = timestamp - lastTime;
+      lastTime = timestamp;
+      update(deltaTime);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // Start the game when the overlay is tapped/clicked
+    overlay.addEventListener('click', () => {
+      if (!gameStarted) {
+        gameStarted = true;
+        overlay.style.display = 'none';
+        resetGame();
+      }
+    });
+
+    // Show the jump button on touch devices
+    if ('ontouchstart' in window || navigator.maxTouchPoints) {
+      jumpButton.style.display = 'block';
+    }
+
+    // Adjust canvas size on window resize
+    window.addEventListener('resize', () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+      player.y = height - 60;
+    });
+  </script>
+</body>
+</html>
